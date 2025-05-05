@@ -4,6 +4,18 @@ This PowerShell script automatically synchronizes privileged users into the **"P
 
 ---
 
+## ⚠️ Notes
+
+Using the **Protected Users** group is a powerful security measure to harden privileged accounts against modern attack techniques:
+
+* 🛡️ It disables legacy authentication methods such as NTLM and weak Kerberos delegation.
+* 🔒 It ensures credentials are not cached on devices, reducing lateral movement risks.
+* 📉 Greatly reduces the attack surface of high-value accounts like Domain Admins.
+
+> ℹ️ Always test in a lab environment before deploying in production.
+
+---
+
 ## 🔧 Features
 
 * ✅ Adds users with `AdminCount = 1` to the **Protected Users** group
@@ -81,17 +93,6 @@ To run this script automatically every day:
 
 ---
 
-## ⚠️ Notes
-
-* Being a member of the **Protected Users** group disables certain legacy authentication methods:
-
-  * NTLM authentication
-  * Kerberos delegation
-  * Default credential storage (e.g., for RDP)
-* Always test in a lab environment before deploying to production.
-
----
-
 ## 📜 License
 
 MIT License – use freely with attribution.
@@ -106,4 +107,4 @@ Feel free to fork and contribute. Issues and PRs are appreciated. 💡
 
 ## 🧠 Author
 
-Built and maintained with 🧠 + 💻 by \cabrauck
+Built and maintained with 🧠 + 💻 by \[YourNameHere]
