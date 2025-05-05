@@ -107,4 +107,4 @@ Feel free to fork and contribute. Issues and PRs are appreciated. 💡
 
 ## 🧠 Author
 
-Built and maintained with 🧠 + 💻 by \[YourNameHere]
+Built and maintained with 🧠 + 💻 by \cabrauck
