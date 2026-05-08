@@ -1,110 +1,226 @@
-# 🛡️ Protected Users Group Sync for Active Directory
+# Protected Users Sync for Active Directory
 
-This PowerShell script automatically synchronizes privileged users into the **"Protected Users"** group in Active Directory based on specific criteria.
+This repository contains a PowerShell-based sync for the Active Directory `Protected Users` group.
 
----
+The script is designed to stay usable as a scheduled task entry point while keeping the decision logic testable and predictable.
 
-## ⚠️ Notes
+## How the script works
 
-Using the **Protected Users** group is a powerful security measure to harden privileged accounts against modern attack techniques:
+On every run, the entry script loads the internal module from the same directory, resolves relative paths against the script folder, and then performs these steps:
 
-* 🛡️ It disables legacy authentication methods such as NTLM and weak Kerberos delegation.
-* 🔒 It ensures credentials are not cached on devices, reducing lateral movement risks.
-* 📉 Greatly reduces the attack surface of high-value accounts like Domain Admins.
+1. Read the current direct user members of the target `Protected Users` group.
+2. Build the desired membership set from:
+   - recursive members of the configured privileged groups
+   - optional `AdminCount=1` users when `-IncludeAdminCount` is enabled
+   - explicit include users
+3. Remove explicit exclude users from the desired set.
+4. Compare current and desired membership by SID, not by `SamAccountName`.
+5. Apply the difference according to `RemovalMode`:
+   - `AddOnly`: add only missing desired users
+   - `Authoritative`: add missing desired users and remove direct members that are no longer desired
+6. Write a rotating log file and return a structured summary object.
 
-> ℹ️ Always test in a lab environment before deploying in production.
+This means the script is idempotent: if nothing changed in AD and the configuration stays the same, a second run should not perform new membership changes.
 
----
+## Repository layout
 
-## 🔧 Features
+- `AddRemove-AdminCount-Users-To-ProtectedUsers.ps1`
+  Stable entry point for manual execution and scheduled tasks.
+- `ProtectedUsersSync.psm1`
+  Internal logic for desired-state calculation, diffing, AD operations, and logging.
+- `ProtectedUsersSync.example.psd1`
+  Example configuration file.
+- `tests/`
+  Pester 5 unit, orchestration, and integration test scaffolding.
 
-* ✅ Adds users with `AdminCount = 1` to the **Protected Users** group
-* ✅ Adds users who are members of any of the following privileged groups:
+## Requirements
 
-  * Domain Admins
-  * Enterprise Admins
-  * Schema Admins
-  * Administrators
-  * Backup Operators
-  * Server Operators
-  * Account Operators
-* ✅ Removes users from **Protected Users** group who no longer meet any of the above criteria
-* 📄 Generates a log file with all actions taken
-* 📁 Archives the previous log on every run
+- Windows host joined to the domain
+- Active Directory PowerShell module
+- Permission to read users/groups and modify the target `Protected Users` group
+- Windows PowerShell 5.1 or newer for production execution
+- PowerShell 7 recommended for local test execution
 
----
+## Parameters
 
-## 📂 Log Output
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `ProtectedUsersGroupIdentity` | `Protected Users` | Target group to maintain |
+| `PrivilegedGroupIdentities` | Built-in list of 7 privileged groups | Source groups used to build the desired membership |
+| `IncludeAdminCount` | `false` | Optionally include `AdminCount=1` users |
+| `ExplicitIncludeUsers` | empty | Always include these users |
+| `ExplicitExcludeUsers` | empty | Always exclude these users, even if another source would include them |
+| `RemovalMode` | `AddOnly` | Membership enforcement mode |
+| `ConfigPath` | none | Optional `.psd1` configuration file |
+| `LogDirectory` | `<script directory>\Logs` | Log directory |
+| `LogFileName` | `ProtectedUsersSync.log` | Current log file name |
 
-* Log directory: `C:\Logs`
-* Current run: `ProtectedUsersSync.log`
-* Archived logs: `ProtectedUsersSync_yyyy-MM-dd_HH-mm-ss.log`
-* Final line in each log includes a summary: e.g.
+## Configuration precedence
 
-  ```text
-  2025-05-05 03:00:00	Script execution completed. 3 users added, 1 user removed from Protected Users group.
-  ```
+The script applies configuration in this order:
 
----
+1. Explicit script parameters
+2. Values from the `.psd1` configuration file
+3. Built-in defaults
 
-## 🚀 Usage
+`AdminCount` is intentionally not part of the default behavior. It must be enabled explicitly with `-IncludeAdminCount` or via the configuration file.
 
-### 1. Requirements
+## Path behavior and scheduled task safety
 
-* PowerShell on a Domain Controller
-* ActiveDirectory PowerShell module
-* Sufficient permissions to modify group memberships (Domain Admin or delegated rights)
+The script is built to remain scheduled-task friendly:
 
-### 2. Manual Execution
+- The entry script keeps the original file name.
+- The internal module is loaded by using `$PSScriptRoot`, so it is found even when the scheduled task starts in `C:\Windows\System32`.
+- Relative `-ConfigPath` and `-LogDirectory` values are resolved relative to the script directory.
+- If you do not set `-LogDirectory`, logs are written to `Logs` under the script directory.
+
+Because of that, you can keep the task simple and do not have to rely on the task's `Start in` directory for module or config resolution.
+
+## Example configuration
+
+Copy the sample file and adjust it for your environment:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\Path\To\ProtectedUsersSync.ps1"
+Copy-Item .\ProtectedUsersSync.example.psd1 .\ProtectedUsersSync.psd1
 ```
 
-### 3. Scheduled Task Setup 🕒
+Example:
 
-To run this script automatically every day:
+```powershell
+@{
+    ProtectedUsersGroupIdentity = 'Protected Users'
+    PrivilegedGroupIdentities   = @(
+        'Domain Admins'
+        'Enterprise Admins'
+        'Schema Admins'
+        'Administrators'
+    )
+    IncludeAdminCount           = $false
+    ExplicitIncludeUsers        = @('svc-breakglass')
+    ExplicitExcludeUsers        = @('legacy-service-account')
+    RemovalMode                 = 'AddOnly'
+    LogDirectory                = '.\Logs'
+    LogFileName                 = 'ProtectedUsersSync.log'
+}
+```
 
-* Open **Task Scheduler**
-* Create a new task:
+## Usage examples
 
-  **General Tab:**
+Dry run:
 
-  * Name: `Protected Users Sync`
-  * Run with highest privileges
-  * Configure for: `Windows Server`
+```powershell
+.\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1 -WhatIf -Verbose
+```
 
-  **Trigger Tab:**
+Run with a configuration file:
 
-  * Daily at `03:00 AM`
+```powershell
+.\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1 -ConfigPath .\ProtectedUsersSync.psd1 -Verbose
+```
 
-  **Action Tab:**
+Enable `AdminCount` as an additional source:
 
-  * Program/script: `powershell.exe`
-  * Add arguments:
+```powershell
+.\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1 -IncludeAdminCount -Verbose
+```
 
-    ```
-    -ExecutionPolicy Bypass -File "C:\Path\To\ProtectedUsersSync.ps1"
-    ```
+Add explicit break-glass users and exclude a legacy service account:
 
-  **Conditions & Settings:**
+```powershell
+.\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1 `
+    -ExplicitIncludeUsers 'svc-breakglass' `
+    -ExplicitExcludeUsers 'legacy-service-account' `
+    -Verbose
+```
 
-  * Configure as needed (e.g., run only if connected to domain)
+Run in full authoritative mode:
 
----
+```powershell
+.\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1 `
+    -RemovalMode Authoritative `
+    -Verbose
+```
 
-## 📜 License
+## Scheduled task examples
 
-MIT License – use freely with attribution.
+Recommended program:
 
----
+```text
+powershell.exe
+```
 
-## ✨ Contributions Welcome!
+Minimal arguments:
 
-Feel free to fork and contribute. Issues and PRs are appreciated. 💡
+```text
+-NoProfile -ExecutionPolicy Bypass -File "C:\Scripts\AD-PrivilegedAccountSync\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1"
+```
 
----
+Using a config file next to the script:
 
-## 🧠 Author
+```text
+-NoProfile -ExecutionPolicy Bypass -File "C:\Scripts\AD-PrivilegedAccountSync\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1" -ConfigPath ".\ProtectedUsersSync.psd1"
+```
 
-Built and maintained with 🧠 + 💻 by \cabrauck
+Using explicit authoritative mode:
+
+```text
+-NoProfile -ExecutionPolicy Bypass -File "C:\Scripts\AD-PrivilegedAccountSync\AddRemove-AdminCount-Users-To-ProtectedUsers.ps1" -RemovalMode Authoritative
+```
+
+Task Scheduler example settings:
+
+- Program/script: `powershell.exe`
+- Add arguments: one of the examples above
+- Run whether user is logged on or not
+- Run with highest privileges
+- Start in: optional
+
+## Logging
+
+The script creates the log directory if needed and rotates the current log before each run.
+
+- Current log: `ProtectedUsersSync.log`
+- Archive pattern: `ProtectedUsersSync_yyyy-MM-dd_HH-mm-ss.log`
+
+Each run logs:
+
+- effective configuration
+- planned adds and removals
+- executed actions
+- warnings and errors
+- final summary
+
+## Output
+
+The script returns a summary object with at least these properties:
+
+- `Mode`
+- `IncludeAdminCount`
+- `CurrentCount`
+- `DesiredCount`
+- `PlannedAddUsers`
+- `PlannedRemoveUsers`
+- `AddedUsers`
+- `RemovedUsers`
+- `SkippedExistingUsers`
+- `ExcludedUsers`
+- `FailedActions`
+- `Succeeded`
+
+If one or more membership changes fail, the script still returns the summary object and exits with code `1`.
+
+## Tests
+
+Run the local test suite with:
+
+```powershell
+pwsh .\tests\Invoke-Tests.ps1
+```
+
+The test runner installs Pester 5 in `CurrentUser` scope when required.
+
+Integration tests are tagged with `Integration` and are skipped by default until you wire them to a lab environment.
+
+## License
+
+MIT
