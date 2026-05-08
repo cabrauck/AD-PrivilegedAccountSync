@@ -4,6 +4,8 @@ This repository contains a PowerShell-based sync for the Active Directory `Prote
 
 The script is designed to stay usable as a scheduled task entry point while keeping the decision logic testable and predictable.
 
+It is a good fit for on-prem Active Directory environments that want a lightweight way to reduce drift between privileged group membership and `Protected Users` without introducing a full IGA, PAM, or provisioning platform. It is less useful when `Protected Users` membership is already managed by an existing source-of-truth system, or when the environment cannot operationally support the authentication restrictions that the group enforces.
+
 ## How the script works
 
 On every run, the entry script loads the internal module from the same directory, resolves relative paths against the script folder, and then performs these steps:
